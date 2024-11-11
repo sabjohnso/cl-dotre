@@ -1,0 +1,5 @@
+#+title: Dotre
+#+subtitle: A Lexical Analyzer Combinator Library
+
+* Status
+Under heavy development and not suitable for use.

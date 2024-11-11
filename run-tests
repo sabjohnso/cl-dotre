@@ -1,0 +1,26 @@
+#!/bin/bash
+#|
+
+set -euo pipefail
+scriptdir=$(cd $(dirname $0) && pwd)
+scriptpath=$scriptdir/$(basename $0)
+sbcl --script $scriptpath
+exit $?
+|#
+
+(require :sb-cover)
+(require :asdf)
+
+(let ((quicklisp-init (merge-pathnames "quicklisp/setup.lisp" (user-homedir-pathname))))
+  (when (probe-file quicklisp-init)
+    (load quicklisp-init)))
+
+(ql:quickload "fiveam")
+
+(asdf:oos 'asdf:load-op :dotre :force t)
+(asdf:oos 'asdf:load-op :dotre/test :force t)
+
+(defun run ()
+  (if (5am:run-all-tests) 0 1))
+
+(sb-ext:exit :code (run))
