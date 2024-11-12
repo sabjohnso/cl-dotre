@@ -80,35 +80,57 @@
     (guard
      (with-slots (lexeme class) lexeme
        (let ((char (peek-char nil inp nil)))
-         (if (and char (class-member (char-code char) class)) (run-pattern lexeme inp) 0))))
+         (if char
+             (and (class-member (char-code char) class)
+                  (run-pattern lexeme inp))
+            (and (repeat-p lexeme)
+                    (or (null (repeat-lower lexeme))
+                        (zerop (repeat-lower lexeme))))))))
     (item
-     (if (peek-char nil inp nil) 1  0))
+     (if (peek-char nil inp nil) 1  nil))
+
     (alt
      (with-slots (first second) lexeme
-       (max (run-pattern first inp)
-            (run-pattern second inp))))
+       (let ((first (run-pattern first inp))
+             (second (run-pattern second inp)))
+         (cond ((and first second)
+                (assert (numberp first))
+                (assert (numberp second))
+                (max first second))
+               (first
+                (assert (numberp first))
+                first)
+               (t second)))))
+
+    (cut
+     (with-slots (first second) lexeme
+       (let ((n (run-pattern first inp)))
+         (or n (run-pattern second inp)))))
+
     (repeat
      (with-slots (lexeme lower upper) lexeme
        (labels ((recur (repetition char-count)
                   (if (and upper (>= repetition upper)) char-count
                       (let ((n (run-pattern lexeme inp)))
-                        (if (zerop n)
-                            (if (or (null lower) (and lower (<= lower repetition))) char-count 0)
-                            (with-chars-held (n inp)
-                              (recur (1+ repetition) (+ n char-count))))))))
+                        (if n (progn
+                                (assert (numberp n))
+                                (with-chars-held (n inp)
+                                  (recur (1+ repetition) (+ n char-count))))
+                            (and (or (null lower) (<= lower repetition)) char-count))))))
          (recur 0 0))))
-    (cut
-     (with-slots (first second) lexeme
-       (let ((n (run-pattern first inp)))
-         (if (zerop n) (run-pattern second inp) n))))
+
 
     (seq
      (with-slots (first second) lexeme
        (let ((m (run-pattern first inp)))
-         (if (zerop m) 0
-             (with-chars-held (m inp)
-               (let ((n (run-pattern second inp)))
-                 (if (zerop n) 0 (+ m n))))))))))
+         (if m (with-chars-held (m inp)
+                 (let ((n (run-pattern second inp)))
+                   (if n (progn
+                           (assert (numberp n))
+                           (assert (numberp m))
+                           (+ m n))
+                       nil)))
+             nil))))))
 
 
 (declaim (ftype (function () guard) item))
@@ -134,11 +156,15 @@ specifies the inclusive minimum number of matches, and if `LOWER' is
 `NIL' the minimum number of matches is 0. `UPPER' specifies the
 inclusive maximum number of matches, and if `UPPER' is `NIL', the
 number is unbounded."
+
+  ;; Note: When `LOWER' is `NIL' or zero, the guard needs to pass through
+  ;; any character because matching zero characters is a success.  Otherwise,
+  ;; the guard from the repeated pattern is used.
   (make-guard
    :lexeme (make-repeat :lexeme lexeme :lower lower :upper upper)
-   ;; Note: The guard is used even if `LOWER' is nil or 0, because
-   ;; matching 0 is equivalent to failing.
-   :class (guard-class lexeme)))
+
+   :class (if (or (null lower) (zerop lower)) (make-character-class (range 0 char-code-limit))
+              (guard-class lexeme))))
 
 
 (declaim (ftype (function (guard character-class) guard) guard))
