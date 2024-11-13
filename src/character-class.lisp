@@ -77,7 +77,10 @@
           do (return t)
         finally (return nil)))
 
-(defun class-union (class1 class2)
+(defun class-union (class1 &rest classes)
+  (apply #'make-character-class (apply #'append class1 classes)))
+
+(defun class-union2 (class1 class2)
   (apply #'make-character-class (append class1 class2)))
 
 (defun class-intersection (class1 class2)

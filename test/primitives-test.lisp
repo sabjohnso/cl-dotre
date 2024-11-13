@@ -164,5 +164,5 @@
                     (char-range #\a #\z)))))
       (is (maybe= 4 (run-pattern (seq letter letter letter digit) inp)))
       (is (maybe= 4 (run-pattern (seq (repeat letter) digit) inp)))
-      (is (= 3 (run-pattern (seq (repeat digit) (repeat letter)) inp)))
+      (is (maybe= 3 (run-pattern (seq (repeat digit) (repeat letter)) inp)))
       (is (null (run-pattern (seq (repeat digit :lower 1) (repeat letter)) inp))))))
