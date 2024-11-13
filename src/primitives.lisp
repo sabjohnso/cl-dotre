@@ -20,9 +20,7 @@
                  (recur (cdr xs) (cons (car xs) ys)))))
     (recur xs ys)))
 
-(defstruct lexeme)
-
-(defstruct (pattern (:include lexeme)))
+(defstruct pattern)
 
 (deftype pattern-list ()
   '(cons pattern list))
@@ -34,7 +32,7 @@
   (class (make-character-class (range 0 char-code-limit)) :type character-class))
 
 (defstruct (repeat (:include pattern))
-  (lexeme (make-item) :type pattern)
+  (pattern (make-item) :type pattern)
   (lower nil :type (or null unsigned-byte))
   (upper nil :type (or null unsigned-byte)))
 
@@ -50,7 +48,7 @@
 
 
 
-(declaim (ftype (function (lexeme stream) unsigned-byte) primitive-lexeme-run))
+(declaim (ftype (function (pattern stream) unsigned-byte) run-pattern))
 
 (defun unread-chars (chars inp)
   (loop for char in chars
@@ -94,14 +92,14 @@
                 run-cut))
 
 
-(defun run-pattern (lexeme inp)
-  (etypecase lexeme
-    (guard  (run-guard  lexeme inp))
-    (item   (run-item   lexeme inp))
-    (alt    (run-alt    lexeme inp))
-    (cut    (run-cut    lexeme inp))
-    (repeat (run-repeat lexeme inp))
-    (seq    (run-seq    lexeme inp))))
+(defun run-pattern (pattern inp)
+  (etypecase pattern
+    (guard  (run-guard  pattern inp))
+    (item   (run-item   pattern inp))
+    (alt    (run-alt    pattern inp))
+    (cut    (run-cut    pattern inp))
+    (repeat (run-repeat pattern inp))
+    (seq    (run-seq    pattern inp))))
 
 (defun run-guard (pattern inp)
   "Run a `GUARD' pattern over an input stream, returning
@@ -123,8 +121,8 @@ end of the stream."
 (defun run-repeat (pattern inp)
   "Run a `REPEAT' pattern over an input stream, returning the
 number of characters matched or `NIL' for failure."
-  (with-slots (lexeme lower upper) pattern
-    (loop for n = (run-pattern lexeme inp)
+  (with-slots (pattern lower upper) pattern
+    (loop for n = (run-pattern pattern inp)
           for m = (if n 1 0) then (if n (1+ m) m)
           when n
                 sum n into accum
@@ -194,8 +192,8 @@ number of characters matched or `NIL' for failure."
   (function (guard &key (:lower optional-unsigned-byte) (:upper optional-unsigned-byte)) guard)
   repeat))
 
-(defun repeat (lexeme &key lower upper)
-  "Return a pattern matching a number of repetitions of `LEXEME'.
+(defun repeat (pattern &key lower upper)
+  "Return a pattern matching a number of repetitions of `PATTERN'.
 
 The number is determined by `LOWER' and `UPPER'. If `LOWER'
 specifies the inclusive minimum number of matches, and if `LOWER' is
@@ -203,15 +201,15 @@ specifies the inclusive minimum number of matches, and if `LOWER' is
 inclusive maximum number of matches, and if `UPPER' is `NIL', the
 number is unbounded."
 
-  ;; Note: When `LOWER' is `NIL' or zero, the guard needs to pass through
-  ;; any character because matching zero characters is a success.  Otherwise,
-  ;; the guard from the repeated pattern is used.
   (make-guard
-   :pattern (make-repeat :lexeme lexeme :lower lower :upper upper)
-
-   :class (if (or (null lower) (zerop lower))
-              (make-character-class (range 0 char-code-limit))
-              (guard-class lexeme))))
+   :pattern (make-repeat :pattern pattern :lower lower :upper upper)
+   :class
+   ;; Note: When `LOWER' is `NIL' or zero, the guard needs to pass through
+   ;; any character because matching zero characters is a success.  Otherwise,
+   ;; the guard from the repeated pattern is used.
+   (if (or (null lower) (zerop lower))
+       (make-character-class (range 0 char-code-limit))
+       (guard-class pattern))))
 
 
 (declaim (ftype (function (guard character-class) guard) guard))
@@ -224,30 +222,29 @@ number is unbounded."
 
 (declaim (ftype (function (guard &rest guard) guard) alt cut seq))
 
-(defun alt (lexeme &rest lexemes)
+(defun alt (pattern &rest patterns)
   "Return a pattern that matches any of the input patterns."
-  (if (null lexemes) lexeme
-      (let ((class (apply #'class-union (guard-class lexeme) (mapcar #'guard-class lexemes))))
+  (if (null patterns) pattern
+      (let ((class (apply #'class-union (guard-class pattern) (mapcar #'guard-class patterns))))
         (make-guard
-         :pattern (make-alt :patterns (cons lexeme lexemes))
+         :pattern (make-alt :patterns (cons pattern patterns))
          :class class))))
 
-(defun cut (lexeme &rest lexemes)
-  "Return a pattern that matches when `LEXEMES' matches, or if it fails, when
-the pattern formed from `LEXEMES' matches."
+(defun cut (pattern &rest patterns)
+  "Return a pattern that matches when one of the input patterns matches.  The length of the match
+returned is that of the first pattern to match."
 
-  (if (null lexemes) lexeme
-      (let  ((class (apply #'class-union (guard-class lexeme) (mapcar #'guard-class lexemes))))
-        ;; ((lexemes (apply #'cut lexemes)))
+  (if (null patterns) pattern
+      (let  ((class (apply #'class-union (guard-class pattern) (mapcar #'guard-class patterns))))
         (make-guard
-         :pattern (make-cut :patterns (cons lexeme lexemes))
+         :pattern (make-cut :patterns (cons pattern patterns))
          :class class))))
 
-(defun seq (lexeme &rest lexemes)
+(defun seq (pattern &rest patterns)
   "Return a pattern that matches when each of the input patterns match
 sequentially."
-  (if (null lexemes) lexeme
+  (if (null patterns) pattern
       (make-guard
        :pattern (make-seq
-                :patterns (cons lexeme lexemes))
-       :class (guard-class lexeme))))
+                :patterns (cons pattern patterns))
+       :class (guard-class pattern))))
