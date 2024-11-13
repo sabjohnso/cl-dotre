@@ -6,6 +6,7 @@
   (:use :cl :dotre.character-range :dotre.character-class )
   (:export #:item
            #:repeat
+           #:peek
            #:alt
            #:cut
            #:seq
@@ -26,6 +27,9 @@
   '(cons pattern list))
 
 (defstruct (item (:include pattern)))
+
+(defstruct (peek (:include pattern))
+  (pattern (make-item) :type pattern))
 
 (defstruct (guard (:include pattern))
   (pattern (make-item) :type pattern)
@@ -96,6 +100,7 @@
   (etypecase pattern
     (guard  (run-guard  pattern inp))
     (item   (run-item   pattern inp))
+    (peek   (run-peek   pattern inp))
     (alt    (run-alt    pattern inp))
     (cut    (run-cut    pattern inp))
     (repeat (run-repeat pattern inp))
@@ -116,6 +121,12 @@ the stream has remaining characters and `NIL' for the
 end of the stream."
   (declare (ignore pattern))
   (if (peek-char nil inp nil) 1  nil))
+
+(defun run-peek (pattern inp)
+  "Run a `PEEK' pattern over an input stream, returning `0' if
+the membe pattern succeeds and `NIL' if it fails."
+  (with-slots (pattern) pattern
+    (and (run-pattern pattern inp) 0)))
 
 
 (defun run-repeat (pattern inp)
@@ -183,6 +194,15 @@ number of characters matched or `NIL' for failure."
   (make-guard
    :pattern (make-item)
    :class (make-character-class (range 0 char-code-limit))))
+
+(declaim (ftype (function (guard) guard) peek))
+(defun peek (pattern)
+  "Return a pattern that succeeds when the input pattern succeeds
+and fails when the input pattern fails, but reporting the length of
+the match as 0 on success."
+  (make-guard
+   :pattern (make-peek :pattern (guard-pattern pattern))
+   :class (guard-class pattern)))
 
 (deftype optional-unsigned-byte ()
   `(or null unsigned-byte))

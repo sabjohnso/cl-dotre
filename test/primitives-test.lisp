@@ -166,3 +166,19 @@
       (is (maybe= 4 (run-pattern (seq (repeat letter) digit) inp)))
       (is (maybe= 3 (run-pattern (seq (repeat digit) (repeat letter)) inp)))
       (is (null (run-pattern (seq (repeat digit :lower 1) (repeat letter)) inp))))))
+
+(test peek
+  (with-input-from-string (inp "abc123")
+    (let* ((letter (guard
+                    (item)
+                    (make-character-class
+                     (char-range #\A #\Z)
+                     (char-range #\a #\z))))
+           (digit (guard
+                   (item)
+                   (make-character-class
+                    (char-range #\0 #\9)))))
+      (is (maybe= 0 (run-pattern  (peek letter) inp)))
+      (is (maybe= 1 (run-pattern (seq letter (peek letter)) inp)))
+      (is (maybe= 3 (run-pattern (seq (repeat letter) (peek digit)) inp)))
+      (is (null (run-pattern (seq letter (peek digit)) inp))))))
