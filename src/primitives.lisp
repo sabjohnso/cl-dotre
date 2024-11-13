@@ -3,7 +3,7 @@
 (defpackage :dotre.primitives
   (:nicknames :prim)
   (:shadow #:copy-seq)
-  (:use :cl :dotre.character-range :dotre.character-class )
+  (:use :cl :dotre.utility :dotre.character-range :dotre.character-class)
   (:export #:item
            #:repeat
            #:peek
@@ -11,15 +11,14 @@
            #:cut
            #:seq
            #:guard
+           #:pattern-p
            #:run-pattern))
 
 (in-package :dotre.primitives)
 
-(defun rappend (xs ys)
-  (labels ((recur (xs ys)
-             (if (null xs) ys
-                 (recur (cdr xs) (cons (car xs) ys)))))
-    (recur xs ys)))
+;;
+;; ... Structures for primitive patterns
+;;
 
 (defstruct pattern)
 
@@ -49,54 +48,102 @@
 (defstruct (seq (:include pattern))
   (patterns (list (make-item)) :type pattern-list))
 
+;;
+;; ... Constructors
+;;
+(declaim (ftype (function (guard character-class) guard) guard))
+(declaim (ftype (function (guard &rest guard) guard) alt cut seq))
+(declaim (ftype (function () guard) item))
+(declaim (ftype (function (guard) guard) peek))
+(declaim
+ (ftype
+  (function (guard &key
+              (:lower optional-unsigned-byte)
+              (:upper optional-unsigned-byte))
+            guard)
+  repeat))
 
+(defun item ()
+  "Return an item that matches any character"
+  (make-guard
+   :pattern (make-item)
+   :class (make-character-class (range 0 char-code-limit))))
 
+(defun peek (pattern)
+  "Return a pattern that succeeds when the input pattern succeeds
+and fails when the input pattern fails, but reporting the length of
+the match as 0 on success."
+  (make-guard
+   :pattern (make-peek :pattern (guard-pattern pattern))
+   :class (guard-class pattern)))
 
-(declaim (ftype (function (pattern stream) unsigned-byte) run-pattern))
+(defun repeat (pattern &key lower upper)
+  "Return a pattern matching a number of repetitions of `PATTERN'.
 
-(defun unread-chars (chars inp)
-  (loop for char in chars
-        do (unread-char char inp)))
+The number is determined by `LOWER' and `UPPER'. If `LOWER'
+specifies the inclusive minimum number of matches, and if `LOWER' is
+`NIL' the minimum number of matches is 0. `UPPER' specifies the
+inclusive maximum number of matches, and if `UPPER' is `NIL', the
+number is unbounded."
 
-(defun has-chars (n inp)
-  (labels ((recur (m accum)
-             (if (>= m n)
-                 (progn
-                   (unread-chars accum inp)
-                   t)
-                 (let ((char (peek-char nil inp nil)))
-                   (if char
-                       (progn
-                         (read-char inp)
-                         (recur (1+ m) (cons char accum)))
-                       (progn
-                         (unread-chars accum inp)
-                         nil))))))
-    (recur 0 nil)))
+  (make-guard
+   :pattern (make-repeat :pattern pattern :lower lower :upper upper)
+   :class
+   ;; Note: When `LOWER' is `NIL' or zero, the guard needs to pass through
+   ;; any character because matching zero characters is a success.  Otherwise,
+   ;; the guard from the repeated pattern is used.
+   (if (or (null lower) (zerop lower))
+       (make-character-class (range 0 char-code-limit))
+       (guard-class pattern))))
 
-(defun read-chars (n inp)
-  (loop for i from 1 to n
-        collecting (read-char inp)))
+(defun guard (pattern class)
+  "Return a pattern with an additional constraint in character class."
+  (make-guard
+   :pattern (guard-pattern pattern)
+   :class (class-intersection (guard-class pattern) class)))
 
-(defmacro with-chars-held ((n inp) &body body)
-  (let ((result (gensym "RESULT"))
-        (var (gensym "VAR")))
-    `(let ((,var (read-chars ,n ,inp)))
-       (let ((,result
-               (progn ,@body)))
-         (unread-chars ,var ,inp)
-         ,result))))
+(defun alt (pattern &rest patterns)
+  "Return a pattern that matches any of the input patterns."
+  (if (null patterns) pattern
+      (let ((class (apply #'class-union (guard-class pattern) (mapcar #'guard-class patterns))))
+        (make-guard
+         :pattern (make-alt :patterns (cons pattern patterns))
+         :class class))))
 
-(declaim (ftype (function (pattern stream) (or null unsigned-byte))
-                run-pattern
-                run-seq
-                run-guard
-                run-item
-                run-alt
-                run-cut))
+(defun cut (pattern &rest patterns)
+  "Return a pattern that matches when one of the input patterns matches.  The length of the match
+returned is that of the first pattern to match."
 
+  (if (null patterns) pattern
+      (let  ((class (apply #'class-union (guard-class pattern) (mapcar #'guard-class patterns))))
+        (make-guard
+         :pattern (make-cut :patterns (cons pattern patterns))
+         :class class))))
+
+(defun seq (pattern &rest patterns)
+  "Return a pattern that matches when each of the input patterns match
+sequentially."
+  (if (null patterns) pattern
+      (make-guard
+       :pattern (make-seq
+                :patterns (cons pattern patterns))
+       :class (guard-class pattern))))
+
+;;
+;; ... Pattern execution
+;;
+(declaim
+ (ftype (function (pattern stream) optional-unsigned-byte)
+        run-pattern
+        run-seq
+        run-guard
+        run-item
+        run-alt
+        run-cut))
 
 (defun run-pattern (pattern inp)
+  "Run a `PATTERN' over an input stream, returning
+the number of characters matched or `NIL' for failure."
   (etypecase pattern
     (guard  (run-guard  pattern inp))
     (item   (run-item   pattern inp))
@@ -184,87 +231,3 @@ number of characters matched or `NIL' for failure."
              (progn
                (unread-chars (reverse accum-chars) inp)
                (return accum)))))
-
-
-
-
-(declaim (ftype (function () guard) item))
-(defun item ()
-  "Return an item that matches any character"
-  (make-guard
-   :pattern (make-item)
-   :class (make-character-class (range 0 char-code-limit))))
-
-(declaim (ftype (function (guard) guard) peek))
-(defun peek (pattern)
-  "Return a pattern that succeeds when the input pattern succeeds
-and fails when the input pattern fails, but reporting the length of
-the match as 0 on success."
-  (make-guard
-   :pattern (make-peek :pattern (guard-pattern pattern))
-   :class (guard-class pattern)))
-
-(deftype optional-unsigned-byte ()
-  `(or null unsigned-byte))
-
-(declaim
- (ftype
-  (function (guard &key (:lower optional-unsigned-byte) (:upper optional-unsigned-byte)) guard)
-  repeat))
-
-(defun repeat (pattern &key lower upper)
-  "Return a pattern matching a number of repetitions of `PATTERN'.
-
-The number is determined by `LOWER' and `UPPER'. If `LOWER'
-specifies the inclusive minimum number of matches, and if `LOWER' is
-`NIL' the minimum number of matches is 0. `UPPER' specifies the
-inclusive maximum number of matches, and if `UPPER' is `NIL', the
-number is unbounded."
-
-  (make-guard
-   :pattern (make-repeat :pattern pattern :lower lower :upper upper)
-   :class
-   ;; Note: When `LOWER' is `NIL' or zero, the guard needs to pass through
-   ;; any character because matching zero characters is a success.  Otherwise,
-   ;; the guard from the repeated pattern is used.
-   (if (or (null lower) (zerop lower))
-       (make-character-class (range 0 char-code-limit))
-       (guard-class pattern))))
-
-
-(declaim (ftype (function (guard character-class) guard) guard))
-
-(defun guard (pattern class)
-  "Return a pattern with an additional constraint in character class."
-  (make-guard
-   :pattern (guard-pattern pattern)
-   :class (class-intersection (guard-class pattern) class)))
-
-(declaim (ftype (function (guard &rest guard) guard) alt cut seq))
-
-(defun alt (pattern &rest patterns)
-  "Return a pattern that matches any of the input patterns."
-  (if (null patterns) pattern
-      (let ((class (apply #'class-union (guard-class pattern) (mapcar #'guard-class patterns))))
-        (make-guard
-         :pattern (make-alt :patterns (cons pattern patterns))
-         :class class))))
-
-(defun cut (pattern &rest patterns)
-  "Return a pattern that matches when one of the input patterns matches.  The length of the match
-returned is that of the first pattern to match."
-
-  (if (null patterns) pattern
-      (let  ((class (apply #'class-union (guard-class pattern) (mapcar #'guard-class patterns))))
-        (make-guard
-         :pattern (make-cut :patterns (cons pattern patterns))
-         :class class))))
-
-(defun seq (pattern &rest patterns)
-  "Return a pattern that matches when each of the input patterns match
-sequentially."
-  (if (null patterns) pattern
-      (make-guard
-       :pattern (make-seq
-                :patterns (cons pattern patterns))
-       :class (guard-class pattern))))

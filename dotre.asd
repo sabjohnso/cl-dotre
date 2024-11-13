@@ -14,7 +14,8 @@
   ((:module "src"
     :serial t
     :components
-    ((:file "character-range")
+    ((:file "utility")
+     (:file "character-range")
      (:file "character-class")
      (:file "primitives")
      (:file "dotre"))))
