@@ -30,7 +30,7 @@
 (defstruct (item (:include pattern)))
 
 (defstruct (guard (:include pattern))
-  (lexeme (make-item) :type pattern)
+  (pattern (make-item) :type pattern)
   (class (make-character-class (range 0 char-code-limit)) :type character-class))
 
 (defstruct (repeat (:include pattern))
@@ -106,11 +106,11 @@
 (defun run-guard (pattern inp)
   "Run a `GUARD' pattern over an input stream, returning
 the number of characters matched or `NIL' for failure."
-  (with-slots (lexeme class) pattern
+  (with-slots (pattern class) pattern
     (let ((char (peek-char nil inp nil)))
       (if char  (and (class-member (char-code char) class)
-                     (run-pattern lexeme inp))
-          (run-pattern lexeme inp)))))
+                     (run-pattern pattern inp))
+          (run-pattern pattern inp)))))
 
 (defun run-item (pattern inp)
   "Run an `ITEM' pattern over an input stream, return 1 if
@@ -183,7 +183,7 @@ number of characters matched or `NIL' for failure."
 (defun item ()
   "Return an item that matches any character"
   (make-guard
-   :lexeme (make-item)
+   :pattern (make-item)
    :class (make-character-class (range 0 char-code-limit))))
 
 (deftype optional-unsigned-byte ()
@@ -207,7 +207,7 @@ number is unbounded."
   ;; any character because matching zero characters is a success.  Otherwise,
   ;; the guard from the repeated pattern is used.
   (make-guard
-   :lexeme (make-repeat :lexeme lexeme :lower lower :upper upper)
+   :pattern (make-repeat :lexeme lexeme :lower lower :upper upper)
 
    :class (if (or (null lower) (zerop lower))
               (make-character-class (range 0 char-code-limit))
@@ -216,11 +216,11 @@ number is unbounded."
 
 (declaim (ftype (function (guard character-class) guard) guard))
 
-(defun guard (lexeme class)
+(defun guard (pattern class)
   "Return a pattern with an additional constraint in character class."
   (make-guard
-   :lexeme (guard-lexeme lexeme)
-   :class (class-intersection (guard-class lexeme) class)))
+   :pattern (guard-pattern pattern)
+   :class (class-intersection (guard-class pattern) class)))
 
 (declaim (ftype (function (guard &rest guard) guard) alt cut seq))
 
@@ -229,7 +229,7 @@ number is unbounded."
   (if (null lexemes) lexeme
       (let ((class (apply #'class-union (guard-class lexeme) (mapcar #'guard-class lexemes))))
         (make-guard
-         :lexeme (make-alt :patterns (cons lexeme lexemes))
+         :pattern (make-alt :patterns (cons lexeme lexemes))
          :class class))))
 
 (defun cut (lexeme &rest lexemes)
@@ -240,7 +240,7 @@ the pattern formed from `LEXEMES' matches."
       (let  ((class (apply #'class-union (guard-class lexeme) (mapcar #'guard-class lexemes))))
         ;; ((lexemes (apply #'cut lexemes)))
         (make-guard
-         :lexeme (make-cut :patterns (cons lexeme lexemes))
+         :pattern (make-cut :patterns (cons lexeme lexemes))
          :class class))))
 
 (defun seq (lexeme &rest lexemes)
@@ -248,6 +248,6 @@ the pattern formed from `LEXEMES' matches."
 sequentially."
   (if (null lexemes) lexeme
       (make-guard
-       :lexeme (make-seq
+       :pattern (make-seq
                 :patterns (cons lexeme lexemes))
        :class (guard-class lexeme))))
