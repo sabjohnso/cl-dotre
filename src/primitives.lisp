@@ -14,30 +14,42 @@
 
 (in-package :dotre.primitives)
 
+(defun rappend (xs ys)
+  (labels ((recur (xs ys)
+             (if (null xs) ys
+                 (recur (cdr xs) (cons (car xs) ys)))))
+    (recur xs ys)))
+
 (defstruct lexeme)
 
-(defstruct (item (:include lexeme)))
+(defstruct (pattern (:include lexeme)))
 
-(defstruct (guard (:include lexeme))
-  (lexeme (make-lexeme) :type lexeme)
-  (class (make-character-class) :type character-class))
+(deftype pattern-list ()
+  '(cons pattern list))
 
-(defstruct (repeat (:include lexeme))
-  (lexeme (make-item) :type lexeme)
+(defstruct (item (:include pattern)))
+
+(defstruct (guard (:include pattern))
+  (lexeme (make-item) :type pattern)
+  (class (make-character-class (range 0 char-code-limit)) :type character-class))
+
+(defstruct (repeat (:include pattern))
+  (lexeme (make-item) :type pattern)
   (lower nil :type (or null unsigned-byte))
   (upper nil :type (or null unsigned-byte)))
 
-(defstruct (alt (:include lexeme))
-  (first (make-item) :type lexeme)
-  (second (make-item) :type lexeme))
+(defstruct (alt (:include pattern))
+  (first (make-item) :type pattern)
+  (second (make-item) :type pattern))
 
-(defstruct (cut (:include lexeme))
-  (first (make-item) :type lexeme)
-  (second (make-item) :type lexeme))
+(defstruct (cut (:include pattern))
+  (first (make-item) :type pattern)
+  (second (make-item) :type pattern))
 
-(defstruct (seq (:include lexeme))
-  (first (make-item) :type lexeme)
-  (second (make-item) :type lexeme))
+(defstruct (seq (:include pattern))
+  (patterns (list (make-item)) :type pattern-list))
+
+
 
 
 (declaim (ftype (function (lexeme stream) unsigned-byte) primitive-lexeme-run))
@@ -75,21 +87,32 @@
          (unread-chars ,var ,inp)
          ,result))))
 
+
 (defun run-pattern (lexeme inp)
   (typecase lexeme
     (guard
+     ;; Note: When a `GUARD' is holding a `REPEAT' pattern accepting zero
+     ;; matches, the `GUARD' needs to allow the match with an empty input
+     ;; stream.
+
+
      (with-slots (lexeme class) lexeme
        (let ((char (peek-char nil inp nil)))
          (if char
-             (and (class-member (char-code char) class)
-                  (run-pattern lexeme inp))
-            (and (repeat-p lexeme)
+             (progn
+               (and (class-member (char-code char) class)
+                    (run-pattern lexeme inp)))
+             (progn
+               (and (repeat-p lexeme)
                     (or (null (repeat-lower lexeme))
-                        (zerop (repeat-lower lexeme))))))))
+                        (zerop (repeat-lower lexeme)))))))))
     (item
      (if (peek-char nil inp nil) 1  nil))
 
     (alt
+     ;; FIXME: `ALT' should be modified to hold a
+     ;; list of patterns to prevent the recursion
+     ;; into the tail of the `ALT' patterns.
      (with-slots (first second) lexeme
        (let ((first (run-pattern first inp))
              (second (run-pattern second inp)))
@@ -103,6 +126,9 @@
                (t second)))))
 
     (cut
+     ;; FIXME: `CUT' should be modified to hold a
+     ;; list of patterns to prevent the recursion
+     ;; into the tail of the `CUT' patterns.
      (with-slots (first second) lexeme
        (let ((n (run-pattern first inp)))
          (or n (run-pattern second inp)))))
@@ -114,6 +140,9 @@
                       (let ((n (run-pattern lexeme inp)))
                         (if n (progn
                                 (assert (numberp n))
+                                ;; FIXME: The recursion will build out the stack,
+                                ;; because of the `WITH-CHARS-HELD' context. The handleing
+                                ;; if this case needs to be modified to use `LOOP'.
                                 (with-chars-held (n inp)
                                   (recur (1+ repetition) (+ n char-count))))
                             (and (or (null lower) (<= lower repetition)) char-count))))))
@@ -121,16 +150,38 @@
 
 
     (seq
-     (with-slots (first second) lexeme
-       (let ((m (run-pattern first inp)))
-         (if m (with-chars-held (m inp)
-                 (let ((n (run-pattern second inp)))
-                   (if n (progn
-                           (assert (numberp n))
-                           (assert (numberp m))
-                           (+ m n))
-                       nil)))
-             nil))))))
+     (with-slots (patterns) lexeme
+       (loop for pattern in patterns
+             for m = (run-pattern pattern inp)
+             for chars = (and m (read-chars m inp))
+             when m
+               sum m into accum
+               and append chars into accum-chars
+             else
+               do (progn
+                    (unread-chars (reverse accum-chars) inp)
+                    (return nil))
+             finally
+                (progn
+                  (unread-chars (reverse accum-chars) inp)
+                  (return accum)))
+
+       ;; (let ((m (run-pattern (car patterns) inp)))
+       ;;   (if m
+       ;;       ;; FIXME: The recursion will build outthe stack,
+       ;;       ;; because of the `WITH-CHARS-HELD' context. The
+       ;;       ;; handling of this case should be modified to use
+       ;;       ;; `LOOP'.  Also `SEQ' should be modified to hold
+       ;;       ;; a list of patterns.
+       ;;       (with-chars-held (m inp)
+       ;;         (let ((n (run-pattern second inp)))
+       ;;           (if n (progn
+       ;;                   (assert (numberp n))
+       ;;                   (assert (numberp m))
+       ;;                   (+ m n))
+       ;;               nil)))
+       ;;       nil))
+       ))))
 
 
 (declaim (ftype (function () guard) item))
@@ -205,6 +256,5 @@ sequentially."
   (if (null lexemes) lexeme
       (make-guard
        :lexeme (make-seq
-                :first (guard-lexeme lexeme)
-                :second (apply #'seq lexemes))
+                :patterns (cons lexeme lexemes))
        :class (guard-class lexeme))))

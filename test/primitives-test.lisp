@@ -13,6 +13,9 @@
 
 (in-suite primitives)
 
+(defun maybe= (x y)
+  (and x y (= x y)))
+
 (test item
   (with-input-from-string (inp "abc123")
     (is (= 1 (run-pattern (item) inp)))
@@ -148,7 +151,6 @@
     (let* ((letter (guard
                     (item)
                     (make-character-class
-                     (char-range #\A #\Z)
                      (char-range #\a #\z))))
            (digit (guard
                    (item)
@@ -160,8 +162,7 @@
                     (char-range #\0 #\9)
                     (char-range #\A #\Z)
                     (char-range #\a #\z)))))
-
-      (is (= 4 (run-pattern (seq letter letter letter digit) inp)))
-      (is (= 4 (run-pattern (seq (repeat letter) digit) inp)))
+      (is (maybe= 4 (run-pattern (seq letter letter letter digit) inp)))
+      (is (maybe= 4 (run-pattern (seq (repeat letter) digit) inp)))
       (is (= 3 (run-pattern (seq (repeat digit) (repeat letter)) inp)))
       (is (null (run-pattern (seq (repeat digit :lower 1) (repeat letter)) inp))))))
